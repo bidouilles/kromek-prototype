@@ -132,7 +132,7 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, ca
     counts["cpm"] = []
     for i in range(4096):
         counts[i] = 0
-    channelsUnion = [0 for i in range (4096)]
+    channelsTotal = [0 for i in range (4096)]
 
     counter = 0
     ratecounter = 0
@@ -207,7 +207,7 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, ca
                 print log
 
                 # Keep union
-                channelsUnion = [x + y for x, y in zip(channelsUnion, [(loggingCounts[i] if i in counts else 0) for i in range(4096)])]
+                channelsTotal = [x + y for x, y in zip(channelsTotal, [(loggingCounts[i] if i in counts else 0) for i in range(4096)])]
 
                 # Upload to database if needed
                 if useDatabase:
@@ -216,7 +216,7 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, ca
 
             if ((captureTime > 0) and (realtime > captureTime)) or ((captureCount > 0) and (totalcounter > captureCount)):
                 # Union latest counts from unfinished period
-                channelsUnion = [x + y for x, y in zip(channelsUnion, [(counts[i] if i in counts else 0) for i in range(4096)])]
+                channelsTotal = [x + y for x, y in zip(channelsTotal, [(counts[i] if i in counts else 0) for i in range(4096)])]
 
                 print "Total captured time %0.3f completed" % realtime
                 print "  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, totalcounter, countrate)
@@ -234,7 +234,7 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, ca
 
     print "Done"
 
-    return channelsUnion, realtime, livetime
+    return channelsTotal, realtime, livetime
 
 # -----------------------------------------------------------------------------
 # Main
@@ -270,6 +270,6 @@ if __name__ == '__main__':
   if options.enumerate:
     sys.exit(0)
 
-  channelsUnion, realtime, livetime = kromekProcess(USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.capturecount, options.path)
+  channelsTotal, realtime, livetime = kromekProcess(USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.capturecount, options.path)
 
-  export2SPE("radangel.spe", 0, channelsUnion, realtime, livetime)
+  export2SPE("radangel.spe", 0, channelsTotal, realtime, livetime)

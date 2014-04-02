@@ -1,4 +1,5 @@
-# Welcome to Kromek raw data processing project
+# Welcome to Kromek project
+You can find here a simple tool to capture gamma spectrum raw data directly from an Kromek RadAngel with USB connection.
 
 # Setup
 ## on Raspberry Pi
@@ -53,11 +54,16 @@ Follow same process as for Raspberry Pi except for cython-hidapi. Replace setup 
 
 ## Sample
 
-Unlimited capture with database upload:
+Unlimited capture with database upload (experimental):
+
     sudo python radangel.py -d unlimited.log
 
 Time capture:
+
     sudo python radangel.py -t 300 capture_5minutes.log
 
 Count capture:
+
     sudo python radangel.py -c 1000 capture_1000counts.log
+
+Note: an SPE file will be generated at the end of each capture session (radangel.spe)
