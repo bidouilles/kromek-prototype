@@ -36,6 +36,7 @@ counts = {}
 counts["cpm"] = []
 counter = 0
 ratecounter = 0
+totalcounter = 0 # keep track of total counts since start
 
 #
 # USB read thread
@@ -46,15 +47,16 @@ class USBReadThread(threading.Thread):
         self.hidDevice = hidDevice
         self.Terminated = False
     def run(self):
-        global counter, ratecounter, counts
+        global counter, ratecounter, totalcounter, counts
         while not self.Terminated:
             d = self.hidDevice.read(62)
             if d:
                 #print d
                 counter += 1
                 ratecounter += 1
+                totalcounter += 1
 
-                channel = (d[1]*256+d[2])/16
+                channel = (d[1]*256+d[2])/16 # ((d[1] << 8 | d[2]) >> 4) = 12bit channel
                 if channel not in counts:
                     counts[channel] = 1
                 else:
@@ -77,7 +79,7 @@ def export2SPE(filename, deviceId, channels, realtime, livetime):
     for i in range(4096):
         speFile.write("%d\n" % channels[i])
 
-    # From multispec tool for RadAngel
+    # From multispec tool for RadAngel (calibration data)
     speFile.write("""$ENER_FIT:
 -357.199955175409 0.969844070381318
 $ENER_DATA:
@@ -114,8 +116,8 @@ def HIDDeviceList():
 #
 # Kromek RAW data processing
 #
-def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, usbHIDPath):
-    global counter, ratecounter, counts
+def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, captureCount, usbHIDPath):
+    global counter, ratecounter, totalcounter, counts
 
     # Initialize variables
     usbRead = None
@@ -212,12 +214,12 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, us
                     data = {"date": now_utc, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": loggingCounter}
                     db.spectrum.insert(data)
 
-            if (captureTime > 0) and (realtime > captureTime):
+            if ((captureTime > 0) and (realtime > captureTime)) or ((captureCount > 0) and (totalcounter > captureCount)):
                 # Union latest counts from unfinished period
                 channelsUnion = [x + y for x, y in zip(channelsUnion, [(counts[i] if i in counts else 0) for i in range(4096)])]
 
                 print "Total captured time %0.3f completed" % realtime
-                print "  realtime = %0.3f, livetime = %0.3f, countrate = %0.3f" % (realtime, livetime, countrate)
+                print "  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, totalcounter, countrate)
                 break
 
     except IOError, ex:
@@ -244,8 +246,11 @@ if __name__ == '__main__':
   parser.add_option("-d", "--database",
                       action="store_true", dest="database", default=False,
                       help="upload to mongodb database")
-  parser.add_option("-c", "--capturetime",
-                      type=int, dest="capturetime", default=-1,
+  parser.add_option("-c", "--capturecount",
+                      type=int, dest="capturecount", default=0,
+                      help="specify the total capture counts (default 0 meaning unlimited)")
+  parser.add_option("-t", "--capturetime",
+                      type=int, dest="capturetime", default=0,
                       help="specify the capture time in seconds (default 0 meaning unlimited)")
   parser.add_option("-e", "--enumerate",
                       action="store_true", dest="enumerate", default=False,
@@ -265,5 +270,6 @@ if __name__ == '__main__':
   if options.enumerate:
     sys.exit(0)
 
-  channelsUnion, realtime, livetime = kromekProcess(USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.path)
+  channelsUnion, realtime, livetime = kromekProcess(USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.capturecount, options.path)
+
   export2SPE("radangel.spe", 0, channelsUnion, realtime, livetime)

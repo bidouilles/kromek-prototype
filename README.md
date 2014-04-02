@@ -1,5 +1,7 @@
 # Welcome to Kromek raw data processing project
-# Setup on Raspberry Pi
+
+# Setup
+## on Raspberry Pi
 
     sudo apt-get install python-dev
     sudo apt-get install python-tz
@@ -25,7 +27,7 @@ Now we need to change the path to libusb from /usr/include/libusb-1.0 to /usr/lo
     sudo cp /lib/arm-linux-gnueabihf/libudev.so.0 /usr/lib/arm-linux-gnueabihf/libudev.so
     sudo python setup.py install
 
-# Setup on Ubuntu PC
+## on Ubuntu PC
 Follow same process as for Raspberry Pi except for cython-hidapi. Replace setup section in setup.py:
 
     setup(
@@ -33,3 +35,29 @@ Follow same process as for Raspberry Pi except for cython-hidapi. Replace setup 
         ext_modules = [Extension("hid", ["hid.pyx", "hid-libusb.c"],
                       libraries=["usb-1.0", "udev", "rt"])]
     )
+
+# Usage
+    Usage: radangel.py [options] <logfile>
+
+    Options:
+      -h, --help            show this help message and exit
+      -d, --database        upload to mongodb database
+      -c CAPTURECOUNT, --capturecount=CAPTURECOUNT
+                            specify the total capture counts (default 0 meaning
+                            unlimited)
+      -t CAPTURETIME, --capturetime=CAPTURETIME
+                            specify the capture time in seconds (default 0 meaning
+                            unlimited)
+      -e, --enumerate       enumerate USB HID devices only
+      -p PATH, --path=PATH  specify USB HID devices path to capture
+
+## Sample
+
+Unlimited capture with database upload:
+    sudo python radangel.py -d unlimited.log
+
+Time capture:
+    sudo python radangel.py -t 300 capture_5minutes.log
+
+Count capture:
+    sudo python radangel.py -c 1000 capture_1000counts.log
