@@ -289,12 +289,6 @@ if __name__ == '__main__':
 
   (options, args) = parser.parse_args()
 
-  if len(args) == 1:
-    logFilename = args[0]
-  else:
-    logFilename = "radangel.log"
-  speFilename = os.path.splitext(logFilename)[0]+".spe"
-
   usbPathList = HIDDeviceList()
   print "Available RadAngel devices =", usbPathList
   if options.enumerate:
@@ -318,6 +312,13 @@ if __name__ == '__main__':
     deviceid = config.devices[devicepath]
   else:
     deviceid = options.deviceid
+
+  # Create the logfile name
+  if len(args) == 1:
+    logFilename = args[0]
+  else:
+    logFilename = "%s_raw.csv" % deviceid
+  speFilename = os.path.splitext(logFilename)[0]+".spe"
 
   channelsTotal, realtime, livetime = kromekProcess(config, deviceid, devicepath, logFilename, options.database & dbSupport, options.capturetime, options.capturecount)
   export2SPE(speFilename, options.deviceid, channelsTotal, realtime, livetime)
