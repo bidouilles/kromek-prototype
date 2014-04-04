@@ -95,6 +95,7 @@ class RadAngelConfiguration():
         self.db_name = config.get('radangel', 'db_name')
         self.db_user = config.get('radangel', 'db_user')
         self.db_passwd = config.get('radangel', 'db_passwd')
+        self.loggingInterval = config.getfloat('radangel', 'logging_interval')
       else:
         print "Configuration file is missing"
         sys.exit(0)
@@ -214,7 +215,7 @@ class RadAngel():
                     livetime = livetime + elapased * (1.0 - countrate * 1E-05);
 
                 elapsed_time = time.time() - start_time
-                if (elapsed_time >= LOGGING_INTERVAL):
+                if (elapsed_time >= self.config.loggingInterval):
                     start_time = time.time()
 
                     # Copy the counter so USB read thread can continue
@@ -252,6 +253,8 @@ class RadAngel():
                     self.logPrint("Total captured time %0.3f completed" % realtime)
                     self.logPrint("  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, self.totalcounter, countrate))
                     break
+
+                time.sleep(0.0001) # force yield for other threads
 
         except IOError, ex:
             self.logPrint( ex )
