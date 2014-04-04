@@ -226,7 +226,8 @@ def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captur
                 # Prepare for logging
                 now_utc = datetime.now(timezone('UTC'))
                 spectrum = ["%d" % (loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)]
-                log = "%s,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), loggingRealtime, loggingLivetime, loggingCounter, ",".join(spectrum))
+                cpm = float(loggingCounter)/loggingLivetime*60.0
+                log = "%s,%s,%0.3f,%0.3f,%0.3f,%s,%s" % (deviceId, now_utc.strftime(zulu_fmt), loggingRealtime, loggingLivetime, cpm, loggingCounter, ",".join(spectrum))
                 logfile.write("%s\n" % log)
                 logfile.flush()
                 print log
@@ -236,7 +237,7 @@ def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captur
 
                 # Upload to database if needed
                 if useDatabase:
-                    data = {"deviceid": deviceId, "date": now_utc, "realtime": loggingRealtime, "livetime": loggingLivetime, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": loggingCounter}
+                    data = {"deviceid": deviceId, "date": now_utc, "realtime": loggingRealtime, "livetime": loggingLivetime, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": cpm, "counts": loggingCounter}
                     db.spectrum.insert(data)
 
             if ((captureTime > 0) and (realtime > captureTime)) or ((captureCount > 0) and (totalcounter > captureCount)):
