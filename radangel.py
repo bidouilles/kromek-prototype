@@ -183,8 +183,8 @@ class RadAngel():
             self.logPrint("Product: %s" % hidDevice.get_product_string())
 
             # Open log file
-            self.logPrint("Create log file %s" % self.logFilename)
-            logfile = open(self.logFilename, "w")
+            self.logPrint("Appending data to %s ..." % self.logFilename)
+            logfile = open(self.logFilename, "a", 1)
 
             # Start timers
             start_time = time.time()
