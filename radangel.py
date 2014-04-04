@@ -133,9 +133,6 @@ def HIDDeviceList():
         keys.sort()
         if d["vendor_id"] == USB_VENDOR_ID:
            usbPathList.append(d["path"])
-        # for key in keys:
-        #     print "%s : %s" % (key, d[key])
-        # print ""
     return usbPathList
 
 #
@@ -156,8 +153,6 @@ def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captur
     previousLivetime = 0.0
 
     counts = {}
-    for i in range(4096):
-        counts[i] = 0
     channelsTotal = [0 for i in range (4096)]
 
     ratecounter = 0
@@ -219,7 +214,7 @@ def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captur
                 loggingLivetime = livetime - previousLivetime
 
                 # Clear counter and channels
-                for i in range(4096): counts[i] = 0
+                counts = {}
                 previousRealtime = realtime
                 previousLivetime = livetime
 
@@ -227,13 +222,13 @@ def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captur
                 now_utc = datetime.now(timezone('UTC'))
                 spectrum = ["%d" % (loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)]
                 cpm = float(loggingCounter)/loggingLivetime*60.0
-                log = "%s,%s,%0.3f,%0.3f,%0.3f,%s,%s" % (deviceId, now_utc.strftime(zulu_fmt), loggingRealtime, loggingLivetime, cpm, loggingCounter, ",".join(spectrum))
+                log = "%s,%s,%0.3f,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), deviceId, loggingRealtime, loggingLivetime, cpm, loggingCounter, ",".join(spectrum))
                 logfile.write("%s\n" % log)
                 logfile.flush()
                 print log
 
                 # Keep union
-                channelsTotal = [x + y for x, y in zip(channelsTotal, [(loggingCounts[i] if i in counts else 0) for i in range(4096)])]
+                channelsTotal = [x + y for x, y in zip(channelsTotal, [(loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)])]
 
                 # Upload to database if needed
                 if useDatabase:
