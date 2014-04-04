@@ -228,7 +228,7 @@ def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captur
                 spectrum = ["%d" % (loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)]
                 log = "%s,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), loggingRealtime, loggingLivetime, loggingCounter, ",".join(spectrum))
                 logfile.write("%s\n" % log)
-                print realtime, livetime
+                logfile.flush()
                 print log
 
                 # Keep union
