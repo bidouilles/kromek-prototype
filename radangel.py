@@ -34,8 +34,6 @@ USB_PRODUCT_ID = 0x100
 
 # Global variables
 counts = {}
-counts["cpm"] = []
-counter = 0
 ratecounter = 0
 totalcounter = 0 # keep track of total counts since start
 
@@ -48,12 +46,11 @@ class USBReadThread(threading.Thread):
         self.hidDevice = hidDevice
         self.Terminated = False
     def run(self):
-        global counter, ratecounter, totalcounter, counts
+        global ratecounter, totalcounter, counts
         while not self.Terminated:
             d = self.hidDevice.read(62, timeout_ms = 50)
             if d:
                 #print d
-                counter += 1
                 ratecounter += 1
                 totalcounter += 1
 
@@ -62,6 +59,7 @@ class USBReadThread(threading.Thread):
                     counts[channel] = 1
                 else:
                     counts[channel] += 1
+            time.sleep(0.0001) # force yield for other threads
     def stop(self):
         self.Terminated = True
 
@@ -120,7 +118,7 @@ def HIDDeviceList():
 # Kromek RAW data processing
 #
 def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captureTime, captureCount, usbHIDPath = None):
-    global counter, ratecounter, totalcounter, counts
+    global ratecounter, totalcounter, counts
 
     # Initialize variables
     usbRead = None
@@ -130,14 +128,14 @@ def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captu
     countrate = 0.0 # CPS
     livetime = 0.0
     realtime = 0.0
+    previousRealtime = 0.0
+    previousLivetime = 0.0
 
     counts = {}
-    counts["cpm"] = []
     for i in range(4096):
         counts[i] = 0
     channelsTotal = [0 for i in range (4096)]
 
-    counter = 0
     ratecounter = 0
 
     if useDatabase:
@@ -195,18 +193,20 @@ def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captu
 
                 # Copy the counter so USB read thread can continue
                 loggingCounts = dict(counts)
-                loggingCounter = counter
+                loggingCounter = sum([loggingCounts[i] for i in loggingCounts])
+                loggingRealtime = realtime - previousRealtime
+                loggingLivetime = livetime - previousLivetime
 
                 # Clear counter and channels
-                counter = 0
                 for i in range(4096): counts[i] = 0
+                previousRealtime = realtime
+                previousLivetime = livetime
 
                 # Prepare for logging
                 now_utc = datetime.now(timezone('UTC'))
-                spectrum = ["%d" % (loggingCounts[i] if i in counts else 0) for i in range(4096)]
-                log = "%s,%s,%s" % (now_utc.strftime(zulu_fmt), loggingCounter, ",".join(spectrum))
+                spectrum = ["%d" % (loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)]
+                log = "%s,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), loggingRealtime, loggingLivetime, loggingCounter, ",".join(spectrum))
                 logfile.write("%s\n" % log)
-                counts["cpm"].append(loggingCounter)
                 print realtime, livetime
                 print log
 
@@ -215,7 +215,7 @@ def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captu
 
                 # Upload to database if needed
                 if useDatabase:
-                    data = {"deviceid": deviceId, "date": now_utc, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": loggingCounter}
+                    data = {"deviceid": deviceId, "date": now_utc, "realtime": loggingRealtime, "livetime": loggingLivetime, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": loggingCounter}
                     db.spectrum.insert(data)
 
             if ((captureTime > 0) and (realtime > captureTime)) or ((captureCount > 0) and (totalcounter > captureCount)):
