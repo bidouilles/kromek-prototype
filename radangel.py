@@ -71,8 +71,8 @@ class USBReadThread(threading.Thread):
 def export2SPE(filename, deviceId, channels, realtime, livetime):
     speFile = open(filename, "w")
     speFile.write("$SPEC_REM:\n")
-    speFile.write("#timestamp,device_ID,realtime,livetime\n")
-    speFile.write("%s,%s,%0.3f,%0.3f\n" % (datetime.now(timezone('UTC')).strftime(zulu_fmt), deviceId, realtime, livetime))
+    speFile.write("#timestamp,device_ID,realtime,livetime,totalcount\n")
+    speFile.write("%s,%s,%0.3f,%0.3f\n" % (datetime.now(timezone('UTC')).strftime(zulu_fmt), deviceId, realtime, livetime, sum(channels)))
     speFile.write("$MEAS_TIM:\n")
     speFile.write("%d %d\n" % (int(realtime), int(livetime)))
     speFile.write("$DATA:\n")
