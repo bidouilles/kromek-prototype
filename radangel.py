@@ -143,6 +143,9 @@ class RadAngel():
         self.captureTime = captureTime
         self.captureCount = captureCount
 
+    def logPrint(self, message):
+       print "[%s] %s" % (self.deviceId, message)
+
     #
     # Kromek RAW data processing
     #
@@ -171,14 +174,15 @@ class RadAngel():
             db.authenticate(self.config.db_user, self.config.db_passwd)
 
         try:
-            print "Opening device id %s [%s]" % (self.deviceId, self.devicePath)
+            self.logPrint("Opening device id %s [%s]" % (self.deviceId, self.devicePath))
             hidDevice = hid.device()
             hidDevice.open_path(self.devicePath)
 
-            print "Manufacturer: %s" % hidDevice.get_manufacturer_string()
-            print "Product: %s" % hidDevice.get_product_string()
+            self.logPrint("Manufacturer: %s" % hidDevice.get_manufacturer_string())
+            self.logPrint("Product: %s" % hidDevice.get_product_string())
 
             # Open log file
+            self.logPrint("Create log file %s" % self.logFilename)
             logfile = open(self.logFilename, "w")
 
             # Start timers
@@ -187,7 +191,7 @@ class RadAngel():
             passcount_start_time = start_time # realtime, livetime computation
 
             # Start USB reading thread
-            print "Start USB reading thread"
+            self.logPrint("Start USB reading thread")
             usbRead = RadAngel.USBReadThread(hidDevice, self)
             usbRead.start()
 
@@ -231,7 +235,7 @@ class RadAngel():
                     log = "%s,%s,%0.3f,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), self.deviceId, loggingRealtime, loggingLivetime, cpm, loggingCounter, ",".join(spectrum))
                     logfile.write("%s\n" % log)
                     logfile.flush()
-                    print log
+                    self.logPrint(log)
 
                     # Keep union
                     channelsTotal = [x + y for x, y in zip(channelsTotal, [(loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)])]
@@ -245,23 +249,23 @@ class RadAngel():
                     # Union latest counts from unfinished period
                     channelsTotal = [x + y for x, y in zip(channelsTotal, [(self.counts[i] if i in self.counts else 0) for i in range(4096)])]
 
-                    print "Total captured time %0.3f completed" % realtime
-                    print "  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, self.totalcounter, countrate)
+                    self.logPrint("Total captured time %0.3f completed" % realtime)
+                    self.logPrint("  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, self.totalcounter, countrate))
                     break
 
         except IOError, ex:
-            print ex
-            print "You probably don't have the hard coded test hid. Update the hid.device line"
-            print "in this script with one from the enumeration list output above and try again."
+            self.logPrint( ex )
+            self.logPrint( "You probably don't have the hard coded test hid. Update the hid.device line" )
+            self.logPrint( "in this script with one from the enumeration list output above and try again." )
         finally:
-            print "Cleanup resources"
+            self.logPrint( "Cleanup resources" )
             if usbRead != None: 
                 usbRead.stop()
                 usbRead.join()
             if hidDevice != None: hidDevice.close()
             if logfile != None: logfile.close()
 
-        print "Done"
+        self.logPrint( "Done" )
 
         return channelsTotal, realtime, livetime
 
