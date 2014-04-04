@@ -9,7 +9,7 @@
 # ----------------------------------------------------------------
 import hid
 import time
-import sys
+import os, sys
 from datetime import datetime
 from pytz import timezone
 from optparse import OptionParser
@@ -20,6 +20,7 @@ try:
     from pymongo import MongoClient
     dbSupport = True
 except:
+    print "No MongoDB support"
     pass
 
 zulu_fmt = "%Y-%m-%dT%H:%M:%SZ"
@@ -49,7 +50,7 @@ class USBReadThread(threading.Thread):
     def run(self):
         global counter, ratecounter, totalcounter, counts
         while not self.Terminated:
-            d = self.hidDevice.read(62)
+            d = self.hidDevice.read(62, timeout_ms = 50)
             if d:
                 #print d
                 counter += 1
@@ -103,20 +104,22 @@ DETECTOR_TYPE_ID:
 # HID device enumerate
 #
 def HIDDeviceList():
+    usbPathList = []
     # Enumarate HID devices
     for d in hid.enumerate(0, 0):
         keys = d.keys()
         keys.sort()
-        # if d["vendor_id"] == USB_VENDOR_ID:
-        #     print "USB path =", d["path"]
-        for key in keys:
-            print "%s : %s" % (key, d[key])
-        print ""
+        if d["vendor_id"] == USB_VENDOR_ID:
+           usbPathList.append(d["path"])
+        # for key in keys:
+        #     print "%s : %s" % (key, d[key])
+        # print ""
+    return usbPathList
 
 #
 # Kromek RAW data processing
 #
-def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, captureCount, usbHIDPath):
+def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captureTime, captureCount, usbHIDPath = None):
     global counter, ratecounter, totalcounter, counts
 
     # Initialize variables
@@ -145,14 +148,15 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, ca
 
     try:
         print "Opening device"
-        hidDevice = hid.device(vendorId, productId, path = usbHIDPath)
+        hidDevice = hid.device()
+        if usbHIDPath == None:
+            hidDevice.open(vendorId, productId)
+        else:
+            hidDevice.open_path(usbHIDPath)
 
         print "Manufacturer: %s" % hidDevice.get_manufacturer_string()
         print "Product: %s" % hidDevice.get_product_string()
         # print "Serial No: %s" % hidDevice.get_serial_number_string()
-
-        # try non-blocking mode by uncommenting the next line
-        hidDevice.set_nonblocking(1)
 
         # Open log file
         logfile = open(logFilename, "w")
@@ -211,7 +215,7 @@ def kromekProcess(vendorId, productId, logFilename, useDatabase, captureTime, ca
 
                 # Upload to database if needed
                 if useDatabase:
-                    data = {"date": now_utc, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": loggingCounter}
+                    data = {"deviceid": deviceId, "date": now_utc, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": loggingCounter}
                     db.spectrum.insert(data)
 
             if ((captureTime > 0) and (realtime > captureTime)) or ((captureCount > 0) and (totalcounter > captureCount)):
@@ -243,21 +247,24 @@ if __name__ == '__main__':
   # Process command line options
   parser = OptionParser("Usage: radangel.py [options] <logfile>")
 
-  parser.add_option("-d", "--database",
-                      action="store_true", dest="database", default=False,
-                      help="upload to mongodb database")
   parser.add_option("-c", "--capturecount",
                       type=int, dest="capturecount", default=0,
                       help="specify the total capture counts (default 0 meaning unlimited)")
-  parser.add_option("-t", "--capturetime",
-                      type=int, dest="capturetime", default=0,
-                      help="specify the capture time in seconds (default 0 meaning unlimited)")
+  parser.add_option("-d", "--database",
+                      action="store_true", dest="database", default=False,
+                      help="upload to mongodb database")
   parser.add_option("-e", "--enumerate",
                       action="store_true", dest="enumerate", default=False,
                       help="enumerate USB HID devices only")
+  parser.add_option("-i", "--deviceid",
+                      type=str, dest="deviceid", default="000000-000000",
+                      help="specify the device id (default 000000-000000)")
   parser.add_option("-p", "--path",
                       type=str, dest="path", default=None,
                       help="specify USB HID devices path to capture")
+  parser.add_option("-t", "--capturetime",
+                      type=int, dest="capturetime", default=0,
+                      help="specify the capture time in seconds (default 0 meaning unlimited)")
 
   (options, args) = parser.parse_args()
 
@@ -265,11 +272,12 @@ if __name__ == '__main__':
     logFilename = args[0]
   else:
     logFilename = "radangel.log"
+  speFilename = os.path.splitext(logFilename)[0]+".spe"
 
-  HIDDeviceList()
+  usbPathList = HIDDeviceList()
+  print "Available RadAngel devices =", usbPathList
   if options.enumerate:
     sys.exit(0)
 
-  channelsTotal, realtime, livetime = kromekProcess(USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.capturecount, options.path)
-
-  export2SPE("radangel.spe", 0, channelsTotal, realtime, livetime)
+  channelsTotal, realtime, livetime = kromekProcess(options.deviceid, USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.capturecount, options.path)
+  export2SPE(speFilename, options.deviceid, channelsTotal, realtime, livetime)
