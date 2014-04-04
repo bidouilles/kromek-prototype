@@ -14,6 +14,7 @@ from datetime import datetime
 from pytz import timezone
 from optparse import OptionParser
 import threading
+import ConfigParser
 
 dbSupport = False
 try:
@@ -36,6 +37,29 @@ USB_PRODUCT_ID = 0x100
 counts = {}
 ratecounter = 0
 totalcounter = 0 # keep track of total counts since start
+
+#
+# Configuration file
+#
+class RadAngelConfiguration():
+    def __init__(self, filename):
+      config = ConfigParser.ConfigParser()
+      config.read(os.path.realpath(os.path.dirname(sys.argv[0]))+"/"+filename)
+
+      if "radangel" in config.sections():
+        self.db_host = config.get('radangel', 'db_host')
+        self.db_port = config.getint('radangel', 'db_port')
+        self.db_name = config.get('radangel', 'db_name')
+        self.db_user = config.get('radangel', 'db_user')
+        self.db_passwd = config.get('radangel', 'db_passwd')
+      else:
+        print "Configuration file is missing"
+        sys.exit(0)
+
+      self.devices = {}
+      if "device" in config.sections():
+        for path, serial in config.items("device"):
+            self.devices[path.replace("_",":").lower()] = serial
 
 #
 # USB read thread
@@ -117,7 +141,7 @@ def HIDDeviceList():
 #
 # Kromek RAW data processing
 #
-def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captureTime, captureCount, usbHIDPath = None):
+def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captureTime, captureCount):
     global ratecounter, totalcounter, counts
 
     # Initialize variables
@@ -139,18 +163,15 @@ def kromekProcess(deviceId, vendorId, productId, logFilename, useDatabase, captu
     ratecounter = 0
 
     if useDatabase:
-        connection = MongoClient("ds030827.mongolab.com", 30827)
-        db = connection["kromek"]
+        connection = MongoClient(config.db_host, config.db_port)
+        db = connection[config.db_name]
         # MongoLab has user authentication
-        db.authenticate("kromek", "kromek")
+        db.authenticate(config.db_user, config.db_passwd)
 
     try:
-        print "Opening device"
+        print "Opening device id %s [%s]" % (deviceId, devicePath)
         hidDevice = hid.device()
-        if usbHIDPath == None:
-            hidDevice.open(vendorId, productId)
-        else:
-            hidDevice.open_path(usbHIDPath)
+        hidDevice.open_path(devicePath)
 
         print "Manufacturer: %s" % hidDevice.get_manufacturer_string()
         print "Product: %s" % hidDevice.get_product_string()
@@ -279,5 +300,24 @@ if __name__ == '__main__':
   if options.enumerate:
     sys.exit(0)
 
-  channelsTotal, realtime, livetime = kromekProcess(options.deviceid, USB_VENDOR_ID, USB_PRODUCT_ID, logFilename, options.database & dbSupport, options.capturetime, options.capturecount, options.path)
+  if len(usbPathList) == 0:
+    print "No RadAngel device is connected"
+    sys.exit(0)
+
+  # Load configuration
+  config = RadAngelConfiguration(".radangel.conf")
+
+  # Select device path
+  if options.path == None:
+    devicepath = usbPathList[0].lower()
+  else:
+    devicepath = options.path.lower()
+
+  # Select device id
+  if (devicepath in config.devices):
+    deviceid = config.devices[devicepath]
+  else:
+    deviceid = options.deviceid
+
+  channelsTotal, realtime, livetime = kromekProcess(config, deviceid, devicepath, logFilename, options.database & dbSupport, options.capturetime, options.capturecount)
   export2SPE(speFilename, options.deviceid, channelsTotal, realtime, livetime)

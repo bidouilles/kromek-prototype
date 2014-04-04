@@ -1,0 +1,8 @@
+[radangel]
+db_host = ds030827.mongolab.com
+db_port = 30827
+db_name = kromek
+db_user = kromek
+db_passwd = kromek
+[device]
+0003_0003_00 = 000000-000000
