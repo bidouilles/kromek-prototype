@@ -33,60 +33,6 @@ PASSCOUNTS_INTERVAL = 0.1
 USB_VENDOR_ID = 0x04d8
 USB_PRODUCT_ID = 0x100
 
-# Global variables
-counts = {}
-ratecounter = 0
-totalcounter = 0 # keep track of total counts since start
-
-#
-# Configuration file
-#
-class RadAngelConfiguration():
-    def __init__(self, filename):
-      config = ConfigParser.ConfigParser()
-      config.read(os.path.realpath(os.path.dirname(sys.argv[0]))+"/"+filename)
-
-      if "radangel" in config.sections():
-        self.db_host = config.get('radangel', 'db_host')
-        self.db_port = config.getint('radangel', 'db_port')
-        self.db_name = config.get('radangel', 'db_name')
-        self.db_user = config.get('radangel', 'db_user')
-        self.db_passwd = config.get('radangel', 'db_passwd')
-      else:
-        print "Configuration file is missing"
-        sys.exit(0)
-
-      self.devices = {}
-      if "device" in config.sections():
-        for path, serial in config.items("device"):
-            self.devices[path.replace("_",":").lower()] = serial
-
-#
-# USB read thread
-#
-class USBReadThread(threading.Thread):
-    def __init__(self, hidDevice):
-        threading.Thread.__init__(self)
-        self.hidDevice = hidDevice
-        self.Terminated = False
-    def run(self):
-        global ratecounter, totalcounter, counts
-        while not self.Terminated:
-            d = self.hidDevice.read(62, timeout_ms = 50)
-            if d:
-                #print d
-                ratecounter += 1
-                totalcounter += 1
-
-                channel = (d[1]*256+d[2])/16 # ((d[1] << 8 | d[2]) >> 4) = 12bit channel
-                if channel not in counts:
-                    counts[channel] = 1
-                else:
-                    counts[channel] += 1
-            time.sleep(0.0001) # force yield for other threads
-    def stop(self):
-        self.Terminated = True
-
 #
 # SPE file export
 #
@@ -94,7 +40,7 @@ def export2SPE(filename, deviceId, channels, realtime, livetime):
     speFile = open(filename, "w")
     speFile.write("$SPEC_REM:\n")
     speFile.write("#timestamp,device_ID,realtime,livetime,totalcount\n")
-    speFile.write("%s,%s,%0.3f,%0.3f\n" % (datetime.now(timezone('UTC')).strftime(zulu_fmt), deviceId, realtime, livetime, sum(channels)))
+    speFile.write("%s,%s,%0.3f,%0.3f,%d\n" % (datetime.now(timezone('UTC')).strftime(zulu_fmt), deviceId, realtime, livetime, sum(channels)))
     speFile.write("$MEAS_TIM:\n")
     speFile.write("%d %d\n" % (int(realtime), int(livetime)))
     speFile.write("$DATA:\n")
@@ -136,126 +82,188 @@ def HIDDeviceList():
     return usbPathList
 
 #
-# Kromek RAW data processing
+# Configuration file
 #
-def kromekProcess(config, deviceId, devicePath, logFilename, useDatabase, captureTime, captureCount):
-    global ratecounter, totalcounter, counts
+class RadAngelConfiguration():
+    def __init__(self, filename):
+      config = ConfigParser.ConfigParser()
+      config.read(os.path.realpath(os.path.dirname(sys.argv[0]))+"/"+filename)
 
-    # Initialize variables
-    usbRead = None
-    logfile = None
-    hidDevice = None
+      if "radangel" in config.sections():
+        self.db_host = config.get('radangel', 'db_host')
+        self.db_port = config.getint('radangel', 'db_port')
+        self.db_name = config.get('radangel', 'db_name')
+        self.db_user = config.get('radangel', 'db_user')
+        self.db_passwd = config.get('radangel', 'db_passwd')
+      else:
+        print "Configuration file is missing"
+        sys.exit(0)
 
-    countrate = 0.0 # CPS
-    livetime = 0.0
-    realtime = 0.0
-    previousRealtime = 0.0
-    previousLivetime = 0.0
+      self.devices = {}
+      if "device" in config.sections():
+        for path, serial in config.items("device"):
+            self.devices[path.replace("_",":").lower()] = serial
 
-    counts = {}
-    channelsTotal = [0 for i in range (4096)]
+#
+# RadAngel processing class
+#
+class RadAngel():
+    #
+    # USB read thread
+    #
+    class USBReadThread(threading.Thread):
+        def __init__(self, hidDevice, radAngelInstance):
+            threading.Thread.__init__(self)
+            self.hidDevice = hidDevice
+            self.radAngelInstance = radAngelInstance
+            self.Terminated = False
+        def run(self):
+            while not self.Terminated:
+                d = self.hidDevice.read(62, timeout_ms = 50)
+                if d:
+                    #print d
+                    self.radAngelInstance.ratecounter += 1
+                    self.radAngelInstance.totalcounter += 1
 
-    ratecounter = 0
+                    channel = (d[1]*256+d[2])/16 # ((d[1] << 8 | d[2]) >> 4) = 12bit channel
+                    if channel not in self.radAngelInstance.counts:
+                        self.radAngelInstance.counts[channel] = 1
+                    else:
+                        self.radAngelInstance.counts[channel] += 1
+                time.sleep(0.0001) # force yield for other threads
+        def stop(self):
+            self.Terminated = True
 
-    if useDatabase:
-        connection = MongoClient(config.db_host, config.db_port)
-        db = connection[config.db_name]
-        # MongoLab has user authentication
-        db.authenticate(config.db_user, config.db_passwd)
+    def __init__(self, config, deviceId, devicePath, logFilename, useDatabase, captureTime, captureCount):
+        self.config = config
+        self.deviceId = deviceId
+        self.devicePath = devicePath
+        self.logFilename = logFilename
+        self.useDatabase = useDatabase
+        self.captureTime = captureTime
+        self.captureCount = captureCount
 
-    try:
-        print "Opening device id %s [%s]" % (deviceId, devicePath)
-        hidDevice = hid.device()
-        hidDevice.open_path(devicePath)
+    #
+    # Kromek RAW data processing
+    #
+    def Process(self):
+        # Initialize variables
+        usbRead = None
+        logfile = None
+        hidDevice = None
 
-        print "Manufacturer: %s" % hidDevice.get_manufacturer_string()
-        print "Product: %s" % hidDevice.get_product_string()
-        # print "Serial No: %s" % hidDevice.get_serial_number_string()
+        countrate = 0.0 # CPS
+        livetime = 0.0
+        realtime = 0.0
+        previousRealtime = 0.0
+        previousLivetime = 0.0
 
-        # Open log file
-        logfile = open(logFilename, "w")
+        # Initialize counters
+        self.counts = {}
+        self.ratecounter = 0
+        self.totalcounter = 0 # keep track of total counts since start
+        channelsTotal = [0 for i in range (4096)]
 
-        # Start timers
-        start_time = time.time()
-        countrate_start_time = start_time # countrate computation
-        passcount_start_time = start_time # realtime, livetime computation
+        if self.useDatabase:
+            connection = MongoClient(self.config.db_host, self.config.db_port)
+            db = connection[self.config.db_name]
+            # MongoLab has user authentication
+            db.authenticate(self.config.db_user, self.config.db_passwd)
 
-        # Start USB reading thread
-        print "Start USB reading thread"
-        usbRead = USBReadThread(hidDevice)
-        usbRead.start()
+        try:
+            print "Opening device id %s [%s]" % (self.deviceId, self.devicePath)
+            hidDevice = hid.device()
+            hidDevice.open_path(self.devicePath)
 
-        # Main loop (Control-C to exit)
-        while True:
-            countrate_elapsed_time = time.time() - countrate_start_time
-            if (countrate_elapsed_time >= COUNTRATE_INTERVAL):
-                countrate_start_time = time.time()
-                countrate = float(ratecounter) / countrate_elapsed_time;
-                ratecounter = 0;
+            print "Manufacturer: %s" % hidDevice.get_manufacturer_string()
+            print "Product: %s" % hidDevice.get_product_string()
 
-            passcount_elapsed_time = time.time() - passcount_start_time
-            if (passcount_elapsed_time >= PASSCOUNTS_INTERVAL):
-                passcount_start_time = time.time()
+            # Open log file
+            logfile = open(self.logFilename, "w")
 
-                currentRealtime = realtime;
+            # Start timers
+            start_time = time.time()
+            countrate_start_time = start_time # countrate computation
+            passcount_start_time = start_time # realtime, livetime computation
+
+            # Start USB reading thread
+            print "Start USB reading thread"
+            usbRead = RadAngel.USBReadThread(hidDevice, self)
+            usbRead.start()
+
+            # Main loop (Control-C to exit)
+            while True:
+                countrate_elapsed_time = time.time() - countrate_start_time
+                if (countrate_elapsed_time >= COUNTRATE_INTERVAL):
+                    countrate_start_time = time.time()
+                    countrate = float(self.ratecounter) / countrate_elapsed_time;
+                    self.ratecounter = 0;
+
+                passcount_elapsed_time = time.time() - passcount_start_time
+                if (passcount_elapsed_time >= PASSCOUNTS_INTERVAL):
+                    passcount_start_time = time.time()
+
+                    currentRealtime = realtime;
+                    elapsed_time = time.time() - start_time
+                    realtime = realtime + passcount_elapsed_time;
+                    elapased = realtime - currentRealtime;
+                    livetime = livetime + elapased * (1.0 - countrate * 1E-05);
+
                 elapsed_time = time.time() - start_time
-                realtime = realtime + passcount_elapsed_time;
-                elapased = realtime - currentRealtime;
-                livetime = livetime + elapased * (1.0 - countrate * 1E-05);
+                if (elapsed_time >= LOGGING_INTERVAL):
+                    start_time = time.time()
 
-            elapsed_time = time.time() - start_time
-            if (elapsed_time >= LOGGING_INTERVAL):
-                start_time = time.time()
+                    # Copy the counter so USB read thread can continue
+                    loggingCounts = dict(self.counts)
+                    loggingCounter = sum([loggingCounts[i] for i in loggingCounts])
+                    loggingRealtime = realtime - previousRealtime
+                    loggingLivetime = livetime - previousLivetime
 
-                # Copy the counter so USB read thread can continue
-                loggingCounts = dict(counts)
-                loggingCounter = sum([loggingCounts[i] for i in loggingCounts])
-                loggingRealtime = realtime - previousRealtime
-                loggingLivetime = livetime - previousLivetime
+                    # Clear counter and channels
+                    self.counts = {}
+                    previousRealtime = realtime
+                    previousLivetime = livetime
 
-                # Clear counter and channels
-                counts = {}
-                previousRealtime = realtime
-                previousLivetime = livetime
+                    # Prepare for logging
+                    now_utc = datetime.now(timezone('UTC'))
+                    spectrum = ["%d" % (loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)]
+                    cpm = float(loggingCounter)/loggingLivetime*60.0
+                    log = "%s,%s,%0.3f,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), self.deviceId, loggingRealtime, loggingLivetime, cpm, loggingCounter, ",".join(spectrum))
+                    logfile.write("%s\n" % log)
+                    logfile.flush()
+                    print log
 
-                # Prepare for logging
-                now_utc = datetime.now(timezone('UTC'))
-                spectrum = ["%d" % (loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)]
-                cpm = float(loggingCounter)/loggingLivetime*60.0
-                log = "%s,%s,%0.3f,%0.3f,%0.3f,%s,%s" % (now_utc.strftime(zulu_fmt), deviceId, loggingRealtime, loggingLivetime, cpm, loggingCounter, ",".join(spectrum))
-                logfile.write("%s\n" % log)
-                logfile.flush()
-                print log
+                    # Keep union
+                    channelsTotal = [x + y for x, y in zip(channelsTotal, [(loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)])]
 
-                # Keep union
-                channelsTotal = [x + y for x, y in zip(channelsTotal, [(loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)])]
+                    # Upload to database if needed
+                    if self.useDatabase:
+                        data = {"deviceid": self.deviceId, "date": now_utc, "realtime": loggingRealtime, "livetime": loggingLivetime, "channels": [(loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)], "cpm": cpm, "counts": loggingCounter}
+                        db.spectrum.insert(data)
 
-                # Upload to database if needed
-                if useDatabase:
-                    data = {"deviceid": deviceId, "date": now_utc, "realtime": loggingRealtime, "livetime": loggingLivetime, "channels": [(loggingCounts[i] if i in counts else 0) for i in range(4096)], "cpm": cpm, "counts": loggingCounter}
-                    db.spectrum.insert(data)
+                if ((self.captureTime > 0) and (realtime > self.captureTime)) or ((self.captureCount > 0) and (self.totalcounter > self.captureCount)):
+                    # Union latest counts from unfinished period
+                    channelsTotal = [x + y for x, y in zip(channelsTotal, [(self.counts[i] if i in self.counts else 0) for i in range(4096)])]
 
-            if ((captureTime > 0) and (realtime > captureTime)) or ((captureCount > 0) and (totalcounter > captureCount)):
-                # Union latest counts from unfinished period
-                channelsTotal = [x + y for x, y in zip(channelsTotal, [(counts[i] if i in counts else 0) for i in range(4096)])]
+                    print "Total captured time %0.3f completed" % realtime
+                    print "  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, self.totalcounter, countrate)
+                    break
 
-                print "Total captured time %0.3f completed" % realtime
-                print "  realtime = %0.3f, livetime = %0.3f, total count = %d, countrate = %0.3f" % (realtime, livetime, totalcounter, countrate)
-                break
+        except IOError, ex:
+            print ex
+            print "You probably don't have the hard coded test hid. Update the hid.device line"
+            print "in this script with one from the enumeration list output above and try again."
+        finally:
+            print "Cleanup resources"
+            if usbRead != None: 
+                usbRead.stop()
+                usbRead.join()
+            if hidDevice != None: hidDevice.close()
+            if logfile != None: logfile.close()
 
-    except IOError, ex:
-        print ex
-        print "You probably don't have the hard coded test hid. Update the hid.device line"
-        print "in this script with one from the enumeration list output above and try again."
-    finally:
-        print "Cleanup resources"
-        if usbRead != None: usbRead.stop()
-        if hidDevice != None: hidDevice.close()
-        if logfile != None: logfile.close()
+        print "Done"
 
-    print "Done"
-
-    return channelsTotal, realtime, livetime
+        return channelsTotal, realtime, livetime
 
 # -----------------------------------------------------------------------------
 # Main
@@ -316,5 +324,6 @@ if __name__ == '__main__':
     logFilename = "%s_raw.csv" % deviceid
   speFilename = os.path.splitext(logFilename)[0]+".spe"
 
-  channelsTotal, realtime, livetime = kromekProcess(config, deviceid, devicepath, logFilename, options.database & dbSupport, options.capturetime, options.capturecount)
-  export2SPE(speFilename, options.deviceid, channelsTotal, realtime, livetime)
+  radAngel = RadAngel(config, deviceid, devicepath, logFilename, options.database & dbSupport, options.capturetime, options.capturecount)
+  channelsTotal, realtime, livetime = radAngel.Process()
+  export2SPE(speFilename, deviceid, channelsTotal, realtime, livetime)
