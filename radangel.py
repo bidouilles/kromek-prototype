@@ -9,16 +9,19 @@
 # ----------------------------------------------------------------
 import hid
 import time
-import os, sys
+import os
+import sys
 from datetime import datetime
 from pytz import timezone
 from optparse import OptionParser
 import threading
 import ConfigParser
+import jsonpickle
+import copy
 
 dbSupport = False
 try:
-    from pymongo import MongoClient
+    from pymongo import MongoClient, errors
     dbSupport = True
 except:
     print "No MongoDB support"
@@ -168,16 +171,30 @@ class RadAngel():
         self.totalcounter = 0 # keep track of total counts since start
         channelsTotal = [0 for i in range (4096)]
 
+        # Cached data
+        try:
+          cachedData = jsonpickle.decode(open("cached_%s.json" % self.deviceId,'r').read())
+          os.remove("cached_%s.json" % self.deviceId)
+        except:
+          cachedData = []
+
         if self.useDatabase:
-            connection = MongoClient(self.config.db_host, self.config.db_port)
-            db = connection[self.config.db_name]
-            # MongoLab has user authentication
-            db.authenticate(self.config.db_user, self.config.db_passwd)
+            try:
+              connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=1000, connectTimeoutMS=1000)
+              db = connection[self.config.db_name]
+              # MongoLab has user authentication
+              db.authenticate(self.config.db_user, self.config.db_passwd)
+            except errors.ConnectionFailure, e:
+              print "Error: %s" % e
+              sys.exit(1)
 
         try:
             self.logPrint("Opening device id %s [%s]" % (self.deviceId, self.devicePath))
             hidDevice = hid.device()
-            hidDevice.open_path(self.devicePath)
+            try:
+              hidDevice.open_path(self.devicePath)
+            except:
+              hidDevice.open(USB_VENDOR_ID, USB_PRODUCT_ID)
 
             self.logPrint("Manufacturer: %s" % hidDevice.get_manufacturer_string())
             self.logPrint("Product: %s" % hidDevice.get_product_string())
@@ -244,7 +261,23 @@ class RadAngel():
                     # Upload to database if needed
                     if self.useDatabase:
                         data = {"deviceid": self.deviceId, "date": now_utc, "realtime": loggingRealtime, "livetime": loggingLivetime, "channels": [(loggingCounts[i] if i in loggingCounts else 0) for i in range(4096)], "cpm": cpm, "counts": loggingCounter}
-                        db.spectrum.insert(data)
+                        cachedData.append(data)
+                        try:
+                          if len(cachedData) > 1:
+                            # We failed previously so we need to reconnect
+                            connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=1000, connectTimeoutMS=1000)
+                            db = connection[self.config.db_name]
+                            db.authenticate(self.config.db_user, self.config.db_passwd)
+
+                          bulkDataInsert = copy.copy(cachedData)
+                          db.spectrum.insert(bulkDataInsert)
+                          self.logPrint("Database updated [%d item(s)]" % len(cachedData))
+                          cachedData = []
+                        except:
+                          # Keep cached data and retry later
+                          self.logPrint("Failed to update database [%d item(s)]" % len(cachedData))
+                          connection.disconnect()
+                          pass
 
                 if ((self.captureTime > 0) and (realtime > self.captureTime)) or ((self.captureCount > 0) and (self.totalcounter > self.captureCount)):
                     # Union latest counts from unfinished period
@@ -262,11 +295,16 @@ class RadAngel():
             self.logPrint( "in this script with one from the enumeration list output above and try again." )
         finally:
             self.logPrint( "Cleanup resources" )
-            if usbRead != None: 
+            if usbRead != None:
                 usbRead.stop()
                 usbRead.join()
             if hidDevice != None: hidDevice.close()
             if logfile != None: logfile.close()
+
+            if len(cachedData):
+                # Dump data that couldn't make it to database for later insert
+                jsonpickle.set_encoder_options('simplejson', sort_keys=True)
+                open("cached_%s.json" % self.deviceId, "w").write(jsonpickle.encode(cachedData))
 
         self.logPrint( "Done" )
 
@@ -314,9 +352,9 @@ if __name__ == '__main__':
 
   # Select device path
   if options.path == None:
-    devicepath = usbPathList[0].lower()
+    devicepath = usbPathList[0].replace("_",":").lower()
   else:
-    devicepath = options.path.lower()
+    devicepath = options.path.replace("_",":").lower()
 
   # Select device id
   if (devicepath in config.devices):

@@ -32,7 +32,12 @@ Now we need to change the path to libusb from /usr/include/libusb-1.0 to /usr/lo
     sudo python setup.py install
 
 ## on Ubuntu PC and Olimex board
-Follow same process as for Raspberry Pi.
+Follow the same process as for Raspberry Pi.
+
+## on Mac OS X
+Follow a similar process as for the Raspberry Pi (maybe using "brew" for some components) except that for the cython-hidapi build with Xcode 5.1 the build command should be:
+
+    ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future python setup.py install
 
 # Usage
     Usage: radangel.py [options] <logfile>
