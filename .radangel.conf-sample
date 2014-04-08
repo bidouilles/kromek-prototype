@@ -4,6 +4,7 @@ db_port = 30827
 db_name = kromek
 db_user = kromek
 db_passwd = kromek
-logging_interval = 60.0
+logging_interval = 60.0 ; in seconds
+network_timeout = 5000 ; in milliseconds
 [device]
 0003_0003_00 = 000000-000000

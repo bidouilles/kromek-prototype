@@ -30,7 +30,6 @@ except:
 zulu_fmt = "%Y-%m-%dT%H:%M:%SZ"
 
 # Global definitions
-LOGGING_INTERVAL = 60.0
 COUNTRATE_INTERVAL = 1.0
 PASSCOUNTS_INTERVAL = 0.1
 USB_VENDOR_ID = 0x04d8
@@ -99,6 +98,7 @@ class RadAngelConfiguration():
         self.db_user = config.get('radangel', 'db_user')
         self.db_passwd = config.get('radangel', 'db_passwd')
         self.loggingInterval = config.getfloat('radangel', 'logging_interval')
+        self.networkTimeout = config.getint('radangel', 'network_timeout')
       else:
         print "Configuration file is missing"
         sys.exit(0)
@@ -180,7 +180,7 @@ class RadAngel():
 
         if self.useDatabase:
             try:
-              connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=1000, connectTimeoutMS=1000)
+              connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=self.config.networkTimeout, connectTimeoutMS=self.config.networkTimeout)
               db = connection[self.config.db_name]
               # MongoLab has user authentication
               db.authenticate(self.config.db_user, self.config.db_passwd)
@@ -265,7 +265,7 @@ class RadAngel():
                         try:
                           if len(cachedData) > 1:
                             # We failed previously so we need to reconnect
-                            connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=1000, connectTimeoutMS=1000)
+                            connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=self.config.networkTimeout, connectTimeoutMS=self.config.networkTimeout)
                             db = connection[self.config.db_name]
                             db.authenticate(self.config.db_user, self.config.db_passwd)
 
