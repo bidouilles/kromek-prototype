@@ -11,6 +11,7 @@ import hid
 import time
 import os
 import sys
+import traceback
 from datetime import datetime
 from pytz import timezone
 from optparse import OptionParser
@@ -184,8 +185,10 @@ class RadAngel():
               db = connection[self.config.db_name]
               # MongoLab has user authentication
               db.authenticate(self.config.db_user, self.config.db_passwd)
-            except errors.ConnectionFailure, e:
-              print "Error: %s" % e
+            except:
+              print '-'*60
+              traceback.print_exc(file=sys.stdout)
+              print '-'*60
               sys.exit(1)
 
         try:
@@ -264,12 +267,19 @@ class RadAngel():
                         cachedData.append(data)
                         try:
                           if len(cachedData) > 1:
-                            # We failed previously so we need to reconnect
-                            connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=self.config.networkTimeout, connectTimeoutMS=self.config.networkTimeout)
-                            db = connection[self.config.db_name]
-                            db.authenticate(self.config.db_user, self.config.db_passwd)
+                            try:
+                              # We failed previously so we need to reconnect
+                              connection = MongoClient(self.config.db_host, self.config.db_port, socketTimeoutMS=self.config.networkTimeout, connectTimeoutMS=self.config.networkTimeout)
+                              db = connection[self.config.db_name]
+                              db.authenticate(self.config.db_user, self.config.db_passwd)
+                            except:
+                              self.logPrint("Database connection failed [%d item(s)]" % len(cachedData))
+                              print '-'*60
+                              traceback.print_exc(file=sys.stdout)
+                              print '-'*60
+                              pass
 
-                          bulkDataInsert = copy.copy(cachedData)
+                          bulkDataInsert = copy.deepcopy(cachedData)
                           db.spectrum.insert(bulkDataInsert)
                           self.logPrint("Database updated [%d item(s)]" % len(cachedData))
                           cachedData = []
@@ -277,6 +287,9 @@ class RadAngel():
                           # Keep cached data and retry later
                           self.logPrint("Failed to update database [%d item(s)]" % len(cachedData))
                           connection.disconnect()
+                          print '-'*60
+                          traceback.print_exc(file=sys.stdout)
+                          print '-'*60
                           pass
 
                 if ((self.captureTime > 0) and (realtime > self.captureTime)) or ((self.captureCount > 0) and (self.totalcounter > self.captureCount)):
@@ -289,10 +302,12 @@ class RadAngel():
 
                 time.sleep(0.0001) # force yield for other threads
 
-        except IOError, ex:
-            self.logPrint( ex )
+        except:
             self.logPrint( "You probably don't have the hard coded test hid. Update the hid.device line" )
             self.logPrint( "in this script with one from the enumeration list output above and try again." )
+            print '-'*60
+            traceback.print_exc(file=sys.stdout)
+            print '-'*60
         finally:
             self.logPrint( "Cleanup resources" )
             if usbRead != None:
