@@ -1,10 +1,10 @@
 [radangel]
-db_host = ds030827.mongolab.com
-db_port = 30827
+db_host = ds049548.mongolab.com
+db_port = 49548
 db_name = kromek
 db_user = kromek
 db_passwd = kromek
-logging_interval = 60.0 ; in seconds
+logging_interval = 3600.0 ; in seconds
 network_timeout = 5000 ; in milliseconds
 [device]
 0003_0003_00 = 000000-000000
